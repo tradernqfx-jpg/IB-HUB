@@ -10,7 +10,8 @@ const bot = new TelegramBot(token, { polling: true });
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    const welcomeMsg = `Hey! I’m Srijit.\n\nI share my raw, top-down setups on Gold and Silver every day, and I help serious traders optimize their risk management.\n\nBefore we talk, let me know your current experience level:\n1️⃣ I’m trading live, but need a better broker setup.\n2️⃣ I’m looking to improve my market structure & risk.\n3️⃣ I’m completely new and need guidance.\n\nReply with 1, 2, or 3.`;
+    const welcomeMsg = `Welcome to The Institutional Desk. 🏛️\n\nMost retail traders get hunted by the market. I share the exact top-down setups I use for Gold (XAUUSD) & Silver with strict 5-point Stop Losses, so you can trade alongside the flow.\n\nI am currently giving away my custom EA and Indicator to serious traders. To get you the right access, tell me where you're at right now:\n\n1️⃣ I have trading capital and want to optimize my broker execution & spreads.\n2️⃣ I'm trading live but struggling with consistency and risk management.\n3️⃣ I'm starting fresh and need the free tools + a solid setup to begin.\n\nReply with 1, 2, or 3.`;
+    
     bot.sendMessage(chatId, welcomeMsg);
 });
 
@@ -18,10 +19,15 @@ bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
+    // Do not reply to the /start command here, only handle the numbers
+    if (text === '/start') return; 
+
     if (text === '1' || text === '2') {
-        bot.sendMessage(chatId, "Awesome, let's get you set up properly. Grab a time on my calendar here to discuss your setup and the Vantage IB: https://calendly.com/srijitfx/vantage-information");
+        bot.sendMessage(chatId, "Perfect. Let's bypass the retail noise. Grab a time on my calendar so I can walk you through the exact Vantage Institutional setup and get your tools connected:\n\n👉 https://calendly.com/srijitfx/vantage-information");
     } else if (text === '3') {
-        bot.sendMessage(chatId, "Welcome to the markets! Start by registering here [Your Vantage Link]. Once funded, I'll send you the free EA and indicator to get started safely.");
+        bot.sendMessage(chatId, "Welcome to the desk. To get the free EA, Indicator, and VIP setups, you need a clean foundation.\n\nStep 1: Open your Vantage account here [Insert Your Vantage Link].\nStep 2: Fund it to activate.\nStep 3: Message me here once funded and I'll send the files directly.");
+    } else {
+        bot.sendMessage(chatId, "Please reply with just the number 1, 2, or 3.");
     }
 });
 
