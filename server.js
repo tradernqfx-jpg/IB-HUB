@@ -18,6 +18,39 @@ if (process.env.TWITTER_Client_ID) {
     });
 }
 
+// Instant Multi-Model Failover Function
+async function generateTweetWithFallback(prompt) {
+    const models = [
+        'gemini-3.8-flash',
+        'gemini-flash-latest',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.1-flash-lite'
+    ];
+    let lastError = '';
+
+    for (const model of models) {
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+
+            const data = await response.json();
+            if (response.ok && data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+                return data.candidates[0].content.parts[0].text.trim();
+            }
+            lastError = `${model}: ${data.error?.message || JSON.stringify(data)}`;
+        } catch (err) {
+            lastError = `${model}: ${err.message}`;
+        }
+    }
+    throw new Error(`All fallback models busy. Last error -> ${lastError}`);
+}
+
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const welcomeMsg = `Welcome to The Institutional Desk. 🏛️\n\nMost retail traders get hunted by the market. I share the exact top-down setups I use for Gold (XAUUSD) & Silver with strict 5-point Stop Losses, so you can trade alongside the flow.\n\nI am currently giving away my custom EA and Indicator to serious traders. To get you the right access, tell me where you're at right now:\n\n1️⃣ I have trading capital and want to optimize my broker execution & spreads.\n2️⃣ I'm trading live but struggling with consistency and risk management.\n3️⃣ I'm starting fresh and need the free tools + a solid setup to begin.\n\nReply with 1, 2, or 3.`;
@@ -41,20 +74,7 @@ bot.on('message', async (msg) => {
         try {
             const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post (strictly under 270 characters). Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text.`;
             
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                })
-            });
-            
-            const data = await response.json();
-            if (!response.ok || !data.candidates) {
-                throw new Error(`Gemini API Error: ${data.error?.message || JSON.stringify(data)}`);
-            }
-            
-            const tweetText = data.candidates[0].content.parts[0].text.trim();
+            const tweetText = await generateTweetWithFallback(prompt);
 
             await bot.sendMessage(chatId, `📝 Drafted Tweet:\n\n${tweetText}\n\nPosting to Twitter...`);
 
