@@ -41,7 +41,6 @@ bot.on('message', async (msg) => {
         try {
             const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post (strictly under 270 characters). Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text.`;
             
-            // Using the active gemini-3.8-flash endpoint
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -60,4 +59,25 @@ bot.on('message', async (msg) => {
             await bot.sendMessage(chatId, `📝 Drafted Tweet:\n\n${tweetText}\n\nPosting to Twitter...`);
 
             if (twitterClient) {
-                await twitterClient.v
+                await twitterClient.v2.tweet(tweetText);
+                await bot.sendMessage(chatId, "✅ Successfully posted to Twitter!");
+            } else {
+                await bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
+            }
+        } catch (error) {
+            console.error(error);
+            bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+        return; 
+    }
+
+    if (text === '1' || text === '2') {
+        bot.sendMessage(chatId, "Perfect. Let's bypass the retail noise. Grab a time on my calendar so I can walk you through the exact Vantage Institutional setup and get your tools connected:\n\n👉 https://calendly.com/srijitfx/vantage-information");
+    } else if (text === '3') {
+        bot.sendMessage(chatId, "Welcome to the desk. To get the free EA, Indicator, and VIP setups, you need a clean foundation.\n\nStep 1: Open your Vantage account here: https://vigco.co/la-com-inv/kZd4XyQp\nStep 2: Fund it to activate.\nStep 3: Message me here once funded and I'll send the files directly.");
+    }
+});
+
+app.get('/', (req, res) => res.send('Institutional Desk Engine is Live.'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
