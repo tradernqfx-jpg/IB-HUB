@@ -39,10 +39,10 @@ bot.on('message', async (msg) => {
         bot.sendMessage(chatId, "⚙️ Gemini is writing your Twitter post...");
         
         try {
-            const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post. Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text.`;
+            const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post ( strictly under 270 characters). Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text.`;
             
-            // Direct API call bypassing the cached SDK
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+            // Using the active gemini-2.5-flash endpoint
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -51,21 +51,24 @@ bot.on('message', async (msg) => {
             });
             
             const data = await response.json();
-            if (!data.candidates) throw new Error(JSON.stringify(data));
+            if (!response.ok || !data.candidates) {
+                throw new Error(`Gemini API Error: ${data.error?.message || JSON.stringify(data)}`);
+            }
             
             const tweetText = data.candidates[0].content.parts[0].text.trim();
 
-            bot.sendMessage(chatId, `📝 Drafted Tweet:\n\n${tweetText}\n\nPosting to Twitter...`);
+            await bot.sendMessage(chatId, `📝 Drafted Tweet:\n\n${tweetText}\n\nPosting to Twitter...`);
 
             if (twitterClient) {
                 await twitterClient.v2.tweet(tweetText);
-                bot.sendMessage(chatId, "✅ Successfully posted to Twitter!");
+                await bot.sendMessage(chatId, "✅ Successfully posted to Twitter!");
             } else {
-                bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
+                await bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
             }
         } catch (error) {
             console.error(error);
-            bot.sendMessage(chatId, "❌ Error generating or posting content.");
+            // Prints the exact error reason directly in Telegram
+            bot.sendMessage(chatId, `❌ Error: ${error.message}`);
         }
         return; 
     }
