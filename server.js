@@ -2,13 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { TwitterApi } = require('twitter-api-v2');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.json());
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 let twitterClient;
 if (process.env.TWITTER_Client_ID) {
@@ -41,12 +39,21 @@ bot.on('message', async (msg) => {
         bot.sendMessage(chatId, "⚙️ Gemini is writing your Twitter post...");
         
         try {
-            // Switched to gemini-pro to bypass Render's package cache
-            const model = genAI.getGenerativeModel({ model: "gemini-pro" });
             const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post. Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text.`;
             
-            const result = await model.generateContent(prompt);
-            const tweetText = result.response.text().trim();
+            // Direct API call bypassing the cached SDK
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            
+            const data = await response.json();
+            if (!data.candidates) throw new Error(JSON.stringify(data));
+            
+            const tweetText = data.candidates[0].content.parts[0].text.trim();
 
             bot.sendMessage(chatId, `📝 Drafted Tweet:\n\n${tweetText}\n\nPosting to Twitter...`);
 
