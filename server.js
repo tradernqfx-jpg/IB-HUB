@@ -8,7 +8,6 @@ app.use(express.json());
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
-// Mapping your exact Render environment variable names
 let twitterClient;
 if (process.env.Twitter_Consumer_Key) {
     twitterClient = new TwitterApi({
@@ -19,17 +18,20 @@ if (process.env.Twitter_Consumer_Key) {
     });
 }
 
-// 1. Primary Engine: NVIDIA Nemotron -> Backup Engine: Gemini
+// Bulletproof Generator with 6-Second Timeout & Automatic Failover
 async function generateTweet(prompt) {
+    // 1. Try NVIDIA Nemotron with a hard 6-second timeout
     if (process.env.NEMOTRON_API_KEY) {
         const nemotronModels = [
             'nvidia/llama-3.3-nemotron-super-49b-v1',
-            'nvidia/llama-3.1-nemotron-nano-8b-v1',
-            'meta/llama-3.3-70b-instruct'
+            'nvidia/llama-3.1-nemotron-nano-8b-v1'
         ];
 
         for (const model of nemotronModels) {
             try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
+
                 const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -41,8 +43,10 @@ async function generateTweet(prompt) {
                         messages: [{ role: 'user', content: prompt }],
                         temperature: 0.6,
                         max_tokens: 250
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeout);
 
                 const data = await response.json();
                 if (response.ok && data.choices && data.choices[0]?.message?.content) {
@@ -50,24 +54,29 @@ async function generateTweet(prompt) {
                     return { text: cleanText, engine: `Nemotron (${model.split('/')[1]})` };
                 }
             } catch (err) {
-                console.error(`Nemotron ${model} failed:`, err.message);
+                console.log(`Nemotron skipped (${err.name === 'AbortError' ? 'Timeout' : err.message})`);
             }
         }
     }
 
-    // Fallback to Gemini if Nemotron is unavailable
-    const geminiModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
+    // 2. Instant Fallback to Gemini if Nemotron times out or fails
+    const geminiModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
     let lastError = '';
 
     for (const model of geminiModels) {
         try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }]
-                })
+                }),
+                signal: controller.signal
             });
+            clearTimeout(timeout);
 
             const data = await response.json();
             if (response.ok && data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
@@ -79,7 +88,7 @@ async function generateTweet(prompt) {
         }
     }
 
-    throw new Error(`Both Nemotron and Gemini failed. Last error: ${lastError}`);
+    throw new Error(`All AI engines failed or timed out. Last error: ${lastError}`);
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -100,7 +109,7 @@ bot.on('message', async (msg) => {
             return bot.sendMessage(chatId, "⚠️ Include your analysis. Example: /post Gold bouncing off 2600...");
         }
 
-        bot.sendMessage(chatId, "⚡ Generating institutional tweet (Nemotron Primary)...");
+        bot.sendMessage(chatId, "⚡ Generating institutional tweet...");
         
         try {
             const prompt = `Act as a BDM and institutional forex trader. Take this raw analysis and format it into a highly engaging Twitter post (strictly under 270 characters). Include relevant emojis, structural reasoning, and strict risk management (e.g., 5-point SL). End exactly with: 'Link in bio for my free EA & VIP setup.'\n\nRaw Analysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text, no quotes or intro.`;
@@ -113,7 +122,7 @@ bot.on('message', async (msg) => {
                 await twitterClient.v2.tweet(tweetText);
                 await bot.sendMessage(chatId, "✅ Successfully posted to Twitter!");
             } else {
-                bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
+                await bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
             }
         } catch (error) {
             console.error(error);
