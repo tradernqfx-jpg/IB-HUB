@@ -8,29 +8,35 @@ app.use(express.json());
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
-let twitterClient;
-if (process.env.Twitter_Consumer_Key) {
+// Flexible Twitter client initialization supporting any variation of your keys
+const apiKey = process.env.Twitter_Consumer_Key || process.env.TWITTER_Client_ID;
+const apiSecret = process.env.Twitter_Consumer_Key_Secret || process.env.TWITTER_Client_Secret;
+const accessToken = process.env.TWITTER_Access_Token || process.env.X_Access_Token;
+const accessSecret = process.env.TWITTER_Access_Token_Secret || process.env.TWITTER_Refresh_Token;
+
+let twitterClient = null;
+if (apiKey && apiSecret && accessToken && accessSecret) {
     twitterClient = new TwitterApi({
-        appKey: process.env.Twitter_Consumer_Key.trim(),
-        appSecret: process.env.Twitter_Consumer_Key_Secret.trim(),
-        accessToken: process.env.TWITTER_Access_Token.trim(),
-        accessSecret: process.env.TWITTER_Access_Token_Secret.trim(),
+        appKey: apiKey.trim(),
+        appSecret: apiSecret.trim(),
+        accessToken: accessToken.trim(),
+        accessSecret: accessSecret.trim(),
     });
 }
 
-// Bulletproof Generator with 6-Second Timeout & Automatic Failover
+// Bulletproof AI Engine with NVIDIA Primary & Gemini Backup
 async function generateTweet(prompt) {
-    // 1. Try NVIDIA Nemotron with a hard 6-second timeout
+    // 1. Try NVIDIA Nemotron First
     if (process.env.NEMOTRON_API_KEY) {
         const nemotronModels = [
             'nvidia/llama-3.3-nemotron-super-49b-v1',
-            'nvidia/llama-3.1-nemotron-nano-8b-v1'
+            'meta/llama-3.3-70b-instruct'
         ];
 
         for (const model of nemotronModels) {
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
+                const timeout = setTimeout(() => controller.abort(), 6000);
 
                 const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
                     method: 'POST',
@@ -54,41 +60,40 @@ async function generateTweet(prompt) {
                     return { text: cleanText, engine: `Nemotron (${model.split('/')[1]})` };
                 }
             } catch (err) {
-                console.log(`Nemotron skipped (${err.name === 'AbortError' ? 'Timeout' : err.message})`);
+                console.log(`Nemotron skipped: ${err.message}`);
             }
         }
     }
 
-    // 2. Instant Fallback to Gemini if Nemotron times out or fails
-    const geminiModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
-    let lastError = '';
+    // 2. Instant Fallback to Gemini if Nemotron fails
+    if (process.env.GEMINI_API_KEY) {
+        const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest'];
+        for (const model of geminiModels) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000);
 
-    for (const model of geminiModels) {
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 6000);
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY.trim()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                }),
-                signal: controller.signal
-            });
-            clearTimeout(timeout);
-
-            const data = await response.json();
-            if (response.ok && data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-                return { text: data.candidates[0].content.parts[0].text.trim(), engine: `Gemini Backup (${model})` };
+                const data = await response.json();
+                if (response.ok && data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+                    return { text: data.candidates[0].content.parts[0].text.trim(), engine: `Gemini Backup (${model})` };
+                }
+            } catch (err) {
+                console.log(`Gemini skipped: ${err.message}`);
             }
-            lastError = data.error?.message || JSON.stringify(data);
-        } catch (err) {
-            lastError = err.message;
         }
     }
 
-    throw new Error(`All AI engines failed or timed out. Last error: ${lastError}`);
+    throw new Error("All AI engines (Nemotron & Gemini) failed or timed out.");
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -122,7 +127,7 @@ bot.on('message', async (msg) => {
                 await twitterClient.v2.tweet(tweetText);
                 await bot.sendMessage(chatId, "✅ Successfully posted to Twitter!");
             } else {
-                await bot.sendMessage(chatId, "⚠️ Twitter API keys not configured.");
+                await bot.sendMessage(chatId, "⚠️ Twitter API keys not configured or recognized.");
             }
         } catch (error) {
             console.error(error);
