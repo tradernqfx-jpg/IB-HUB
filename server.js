@@ -24,37 +24,75 @@ if (apiKey && apiSecret && accessToken && accessSecret) {
     });
 }
 
+// Hard timeout wrapper that forces Node to move on if an API hangs
+function fetchWithHardTimeout(url, options, timeoutMs = 4500) {
+    return Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+        )
+    ]);
+}
+
 async function generateTweet(prompt) {
     let errors = [];
 
-    // 1. Primary Engine: NVIDIA NIM (Fast non-thinking Llama 3.3 70B + Nemotron Super)
+    // 1. Primary Fast Engine: Gemini 3.8 Flash (4.5s hard limit per attempt)
+    if (process.env.GEMINI_API_KEY) {
+        const geminiModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
+        for (const model of geminiModels) {
+            try {
+                const response = await fetchWithHardTimeout(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY.trim()}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        })
+                    },
+                    5000
+                );
+                const data = await response.json();
+                if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    return { text: data.candidates[0].content.parts[0].text.trim(), engine: `Gemini (${model})` };
+                }
+                errors.push(`${model}: ${data.error?.message || JSON.stringify(data)}`);
+            } catch (err) {
+                errors.push(`${model}: ${err.message}`);
+            }
+        }
+    }
+
+    // 2. Backup Engine: NVIDIA NIM (with strict 4.5s cut-off so it never hangs)
     if (process.env.NEMOTRON_API_KEY) {
         const nvidiaModels = [
+            'meta/llama-3.1-8b-instruct',
             'meta/llama-3.3-70b-instruct',
-            'nvidia/llama-3.3-nemotron-super-49b-v1',
             'nvidia/llama-3.1-nemotron-nano-8b-v1'
         ];
 
         for (const model of nvidiaModels) {
             try {
-                const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${process.env.NEMOTRON_API_KEY.trim()}`
+                const response = await fetchWithHardTimeout(
+                    'https://integrate.api.nvidia.com/v1/chat/completions',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${process.env.NEMOTRON_API_KEY.trim()}`
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: [{ role: 'user', content: prompt }],
+                            temperature: 0.6,
+                            max_tokens: 300
+                        })
                     },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [{ role: 'user', content: prompt }],
-                        temperature: 0.6,
-                        max_tokens: 1024
-                    })
-                });
+                    4500
+                );
 
-                const rawText = await response.text();
-                let data;
-                try { data = JSON.parse(rawText); } catch (e) { throw new Error(rawText.slice(0, 100)); }
-
+                const data = await response.json();
                 if (response.ok && data.choices?.[0]?.message?.content) {
                     const cleanText = data.choices[0].message.content
                         .replace(/<think>[\s\S]*?<\/think>/g, '')
@@ -63,30 +101,7 @@ async function generateTweet(prompt) {
                         return { text: cleanText, engine: `NVIDIA (${model.split('/')[1]})` };
                     }
                 }
-                errors.push(`${model}: ${data.detail || data.error?.message || rawText.slice(0, 100)}`);
-            } catch (err) {
-                errors.push(`${model}: ${err.message}`);
-            }
-        }
-    }
-
-    // 2. Backup Engine: Gemini 3.8 Flash (Proven working on your key at 3:24 AM)
-    if (process.env.GEMINI_API_KEY) {
-        const geminiModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
-        for (const model of geminiModels) {
-            try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY.trim()}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
-                    })
-                });
-                const data = await response.json();
-                if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                    return { text: data.candidates[0].content.parts[0].text.trim(), engine: `Gemini (${model})` };
-                }
-                errors.push(`${model}: ${data.error?.message || JSON.stringify(data)}`);
+                errors.push(`${model}: ${data.detail || data.error?.message || 'Empty response'}`);
             } catch (err) {
                 errors.push(`${model}: ${err.message}`);
             }
@@ -114,7 +129,7 @@ bot.on('message', async (msg) => {
             return bot.sendMessage(chatId, "⚠️ Include your analysis. Example: /post Gold bouncing off 2600...");
         }
 
-        bot.sendMessage(chatId, "⚡ Generating tweet...");
+        await bot.sendMessage(chatId, "⚡ Generating tweet...");
         
         try {
             const prompt = `Act as an institutional forex trader. Format this analysis into a short Twitter post (strictly under 270 characters) with emojis and a 5-point SL. End with: 'Link in bio for my free EA & VIP setup.'\n\nAnalysis: ${rawAnalysis}\n\nReturn ONLY the exact tweet text, no quotes or intro.`;
@@ -131,7 +146,7 @@ bot.on('message', async (msg) => {
             }
         } catch (error) {
             console.error(error);
-            bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            await bot.sendMessage(chatId, `❌ Error: ${error.message}`);
         }
         return; 
     }
